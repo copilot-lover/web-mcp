@@ -1,0 +1,864 @@
+/* ============================================================
+   FOCUS — DARKROOM identity
+   One warm-charcoal room. One brass lamp. One lit node.
+   No gradients, no blur, no box-shadow. Glow is SVG opacity.
+   ============================================================ */
+
+:root {
+  /* Palette */
+  --bg-primary: #131110;       /* Gesso — warm near-black canvas */
+  --bg-secondary: #211C16;     /* Charcoal — raised plaque only */
+  --ash: #6B6455;              /* Ash — receded layer, secondary text, captions */
+  --accent: #D9A94A;           /* Lamp — the ONE brass accent */
+  --warm-gold: rgba(217, 169, 74, 0.62); /* Receded brass — every non-lamp surface. Keeps the room single-accent. */
+  --ivory: #F3ECDF;            /* Ivory — lit text */
+  --clay: #B0492F;             /* Clay — overload/deadline only, muted ember */
+
+  /* Role aliases (components reference these) */
+  --text-primary: var(--ivory);
+  --text-secondary: var(--ash);
+  --text-muted: var(--ash);
+  --border: rgba(243, 236, 223, 0.11);   /* hairline */
+
+  /* Typefaces */
+  --font-display: "Bricolage Grotesque", system-ui, sans-serif;
+  --font-body: "Schibsted Grotesk", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", monospace;
+
+  /* Type scale */
+  --fs-10: 10px;
+  --fs-11: 11px;
+  --fs-12: 12px;
+  --fs-14: 14px;
+  --fs-16: 16px;
+  --fs-20: 20px;
+  --fs-30: 30px;
+  --fs-34: 34px;
+  --lh-display: 1.1;
+  --lh-body: 1.5;
+  --lh-mono: 1.4;
+
+  /* Spacing (base 4) */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+  --sp-7: 48px;
+  --sp-8: 64px;
+
+  /* Radii (near-zero) */
+  --radius: 3px;
+
+  /* Opacity tokens */
+  --beam-opacity: 0.18;
+  --dim-node-opacity: 0.22;
+  --receded-below-opacity: 0.18;
+  --graticule-opacity: 0.07;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body, #root {
+  height: 100%;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-size: var(--fs-14);
+  line-height: var(--lh-body);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* --- App layout --- */
+.app {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* --- Top Bar: thin transparent bezel, single hairline bottom --- */
+.top-bar {
+  position: relative;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 28px;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  flex-shrink: 0;
+}
+
+.top-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.logo {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+}
+
+.reticle-dot {
+  width: 6px;
+  height: 6px;
+  border: 1px solid var(--warm-gold);
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.top-bar-separator {
+  width: 1px;
+  height: 18px;
+  background: var(--border);
+}
+
+.today-label {
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.avail-sep {
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  color: var(--text-muted);
+}
+
+.available-time {
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.available-time .avail-num {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* Overload signal lamp — ONE lamp. Fills Clay only when overload is high. */
+.top-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.overload-signal {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.overload-lamp {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1px solid var(--ash);
+  background: transparent;
+  flex-shrink: 0;
+}
+
+.overload-signal.is-high { color: var(--clay); }
+.overload-signal.is-high .overload-lamp {
+  background: var(--clay);
+  border-color: var(--clay);
+}
+
+/* --- Main canvas: the map is the center stage --- */
+.main-content {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  position: relative;
+}
+
+.map-canvas {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  overflow: hidden;
+  background: var(--bg-primary);
+}
+
+/* --- Cognitive Map SVG --- */
+.cognitive-map-container {
+  position: absolute;
+  inset: 0;
+}
+
+.cognitive-map-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.cognitive-map-svg text {
+  user-select: none;
+  pointer-events: none;
+}
+
+.task-node {
+  cursor: default;
+}
+
+.context-constellation,
+.context-node {
+  pointer-events: none;
+}
+
+/* The Lock — one-shot settle. No looping. */
+.reticle-ring {
+  animation: ring-settle 0.22s ease-out forwards;
+  transform-origin: 0 0;
+}
+
+.reticle-tick {
+  animation: lock-tick 0.22s ease-out forwards;
+  transform-origin: 0 0;
+}
+
+@keyframes ring-settle {
+  from { transform: scale(1.06); }
+  to   { transform: scale(1); }
+}
+
+@keyframes lock-tick {
+  from { transform: translate(var(--lock-from-x), var(--lock-from-y)); }
+  to   { transform: translate(var(--cx), var(--cy)); }
+}
+
+/* --- Focus Center: the dominant, centred card carrying the next action --- */
+.focus-center-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px 24px;   /* top padding keeps the lit node + beam visible */
+  pointer-events: none;      /* let the graph breathe; the card re-enables below */
+}
+
+.focus-center {
+  position: relative;
+  width: 380px;
+  max-width: 92vw;
+  background: var(--bg-secondary);
+  border: 1px solid var(--warm-gold);
+  border-radius: var(--radius);
+  padding: 22px 24px;
+  pointer-events: auto;
+}
+
+.focus-center-banner {
+  font-family: var(--font-mono);
+  font-size: var(--fs-10);
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  color: var(--ash);
+  margin-bottom: var(--sp-3);
+}
+
+.focus-center-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-10);
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: var(--sp-3);
+}
+
+.focus-center-title {
+  font-family: var(--font-display);
+  font-size: var(--fs-34);
+  font-weight: 600;
+  line-height: var(--lh-display);
+  color: var(--text-primary);
+  margin-bottom: var(--sp-3);
+  letter-spacing: -0.01em;
+}
+
+.focus-center-meta {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: baseline;
+  margin-bottom: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.focus-center-duration {
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  font-weight: 600;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.focus-center-deadline {
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  color: var(--clay);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.focus-center-why {
+  margin-bottom: var(--sp-2);
+}
+
+.focus-center-reason {
+  font-family: var(--font-body);
+  font-size: var(--fs-12);
+  color: var(--text-secondary);
+  margin-bottom: var(--sp-1);
+  line-height: var(--lh-body);
+}
+
+.focus-center-reason-key {
+  font-family: var(--font-mono);
+  font-size: var(--fs-10);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.focus-center-capacity {
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  color: var(--ash);
+}
+
+.focus-center-actions {
+  display: flex;
+  gap: var(--sp-2);
+  margin-top: var(--sp-4);
+}
+
+.focus-center-actions .btn {
+  flex: 1;
+}
+
+/* Override picker — compact / collapsible */
+.override-picker {
+  margin-top: var(--sp-4);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border);
+}
+
+.override-picker-label {
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+  margin-bottom: var(--sp-2);
+}
+
+.override-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  margin-bottom: var(--sp-3);
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.override-option {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 8px 10px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font-body);
+  font-size: var(--fs-12);
+  color: var(--text-primary);
+  transition: border-color 0.15s ease;
+}
+
+.override-option:hover {
+  border-color: var(--text-muted);
+}
+
+.override-option.selected {
+  border-color: var(--ivory);   /* hairline Ivory border */
+  background: transparent;
+}
+
+.override-option-title {
+  font-weight: 500;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.override-option-time {
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.override-confirm {
+  display: flex;
+  gap: var(--sp-2);
+}
+
+.override-confirm .btn {
+  flex: 1;
+}
+
+/* --- Empty state (all tasks done) --- */
+.all-clear {
+  background: var(--bg-secondary);
+  border: 1px solid var(--warm-gold);
+  border-radius: var(--radius);
+  padding: 28px 32px;
+  text-align: center;
+  pointer-events: auto;
+}
+
+.all-clear .reticle-dot {
+  display: block;
+  margin: 0 auto var(--sp-3);
+}
+
+.all-clear-title {
+  font-family: var(--font-display);
+  font-size: var(--fs-30);
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: var(--sp-2);
+}
+
+.all-clear-sub {
+  font-family: var(--font-body);
+  font-size: var(--fs-14);
+  color: var(--text-secondary);
+}
+
+/* --- Time selector (top bar) --- */
+.time-select {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: var(--sp-2);
+}
+
+.time-preset {
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  letter-spacing: 0.06em;
+  text-transform: lowercase;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  padding: 4px 8px;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.time-preset:hover {
+  color: var(--text-primary);
+}
+
+.time-preset.is-active {
+  color: var(--text-primary);
+  border-color: var(--warm-gold);
+}
+
+.time-select-custom {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 4px;
+}
+
+.time-select-custom input {
+  width: 56px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  color: var(--text-primary);
+  background: transparent;
+  border: 1px solid var(--warm-gold);
+  border-radius: var(--radius);
+  padding: 4px 6px;
+}
+
+.time-select-custom input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.time-select-set {
+  font-size: var(--fs-11);
+  padding: 4px 8px;
+}
+
+/* --- Buttons --- */
+.btn {
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  line-height: 1;
+  padding: 11px 16px;
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+}
+
+.btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* Filled Lamp — the single filled control */
+.btn-primary {
+  background: var(--accent);
+  color: #131110;
+  border-color: var(--accent);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #e7bc63;
+  border-color: #e7bc63;
+}
+
+/* Hollow Ivory frame — lit on hover */
+.btn-secondary {
+  background: transparent;
+  color: var(--text-primary);
+  border-color: var(--text-primary);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Quiet text button */
+.btn-text {
+  background: transparent;
+  color: var(--text-muted);
+  border-color: transparent;
+  padding: 11px 12px;
+}
+
+.btn-text:hover:not(:disabled) {
+  color: var(--text-primary);
+}
+
+/* Companion opener — quiet brass-tinged text button in the top bar */
+.top-bar-companion {
+  padding: 8px 10px;
+  font-size: var(--fs-11);
+  color: var(--ash);
+  margin-left: 4px;
+}
+
+.top-bar-companion:hover:not(:disabled) {
+  color: var(--accent);
+}
+
+/* Clay — abandon / danger */
+.btn-clay {
+  color: var(--clay);
+}
+
+/* --- PlanTimeline → EXECUTION SEQUENCE as a quiet mono column --- */
+.plan-timeline {
+  position: absolute;
+  z-index: 20;
+  top: 0;
+  right: 0;
+  max-height: 100%;
+  padding: 20px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.plan-timeline-label {
+  font-family: var(--font-mono);
+  font-size: var(--fs-10);
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: var(--sp-3);
+}
+
+.timeline-items {
+  display: flex;
+  flex-direction: column;
+}
+
+.timeline-item {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: baseline;
+  padding: var(--sp-1) 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.timeline-item:last-child {
+  border-bottom: none;
+}
+
+.timeline-marker {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 12px;
+  flex-shrink: 0;
+}
+
+.timeline-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ash);
+  margin-top: 4px;
+}
+
+.timeline-content {
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+}
+
+.timeline-title {
+  flex: 1;
+  color: var(--text-secondary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timeline-time {
+  color: var(--text-muted);
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.timeline-badge {
+  display: none;
+}
+
+.plan-timeline-capacity {
+  font-family: var(--font-mono);
+  font-size: var(--fs-10);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ash);
+  margin-bottom: var(--sp-2);
+}
+
+.timeline-item.is-overflow {
+  opacity: 0.4;
+}
+
+/* --- ActivityRail → AGENT LOG (quiet mono feed, lower-left) --- */
+.activity-rail {
+  position: absolute;
+  z-index: 20;
+  right: 24px;
+  bottom: 20px;
+  max-width: 340px;
+  pointer-events: none;
+}
+
+.activity-rail-label {
+  font-family: var(--font-mono);
+  font-size: var(--fs-10);
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: var(--sp-2);
+}
+
+.activity-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.activity-item {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: baseline;
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  border-left: 1px solid var(--border);
+  padding-left: var(--sp-2);
+}
+
+.activity-version {
+  font-size: var(--fs-10);
+  font-weight: 600;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 26px;
+}
+
+.activity-detail {
+  color: var(--text-secondary);
+  line-height: var(--lh-mono);
+  /* Flex child must be allowed to shrink so long feed lines wrap instead of
+     overflowing the rail and being clipped mid-word by the canvas. */
+  flex: 1;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.activity-item.is-overload .activity-detail {
+  color: var(--clay);
+}
+
+/* --- FocusMode: one aperture ring around the one task --- */
+.focus-mode-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--bg-primary);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.focus-mode-aperture {
+  position: relative;
+  width: min(420px, 86vw);
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.focus-mode-ring {
+  position: absolute;
+  inset: 0;
+}
+
+.focus-mode-content {
+  position: relative;
+  text-align: center;
+  max-width: 320px;
+  padding: 40px;
+  z-index: 1;
+}
+
+.focus-mode-label {
+  font-family: var(--font-mono);
+  font-size: var(--fs-10);
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: var(--sp-3);
+}
+
+.focus-mode-title {
+  font-family: var(--font-display);
+  font-size: var(--fs-34);
+  font-weight: 600;
+  line-height: var(--lh-display);
+  color: var(--text-primary);
+  margin-bottom: var(--sp-5);
+  letter-spacing: -0.01em;
+}
+
+.focus-mode-timer {
+  margin-bottom: var(--sp-4);
+}
+
+.focus-mode-time {
+  font-family: var(--font-mono);
+  font-size: clamp(48px, 12vw, 72px);
+  font-weight: 500;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.focus-mode-total-label {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  color: var(--text-muted);
+  margin-top: var(--sp-1);
+}
+
+.focus-mode-subtext {
+  font-family: var(--font-body);
+  font-size: var(--fs-14);
+  color: var(--text-secondary);
+  margin-bottom: var(--sp-6);
+}
+
+.focus-mode-actions {
+  display: flex;
+  justify-content: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+/* --- Focus visibility --- */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+button:focus-visible,
+.override-option:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* --- Reduced motion: skip the Lock settle; no transitions --- */
+@media (prefers-reduced-motion: reduce) {
+  .reticle-ring { animation: none; transform: scale(1); }
+  .reticle-tick { animation: none; transform: translate(var(--cx), var(--cy)); }
+  .task-node { transition: none; }
+  .btn, .btn-primary, .btn-secondary, .btn-text, .override-option { transition: none; }
+  .focus-center-title, .focus-mode-title, .focus-mode-time { letter-spacing: normal; }
+}
