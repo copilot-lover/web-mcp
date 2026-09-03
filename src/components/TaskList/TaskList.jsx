@@ -22,8 +22,30 @@ export default function TaskList() {
   const [feedback, setFeedback] = useState("");
   const inputRef = useRef(null);
 
+  const currentProposal = useFocusStore((s) => s.currentProposal);
+  const bottleneckTaskId = useFocusStore((s) => s.bottleneckTaskId);
   const activeTasks = tasks.filter((t) => t.status === "backlog");
   const doneCount = tasks.filter((t) => t.status === "completed").length;
+  // Chain = proposal chain if exists, else bottleneck downstream (so relationships stay visible before the agent proposes)
+  const chainIds = (() => {
+    if (currentProposal?.orderedTaskIds?.length) return currentProposal.orderedTaskIds;
+    if (!bottleneckTaskId) return [];
+    const visited = new Set();
+    const queue = [bottleneckTaskId];
+    const res = [];
+    while (queue.length) {
+      const cur = queue.shift();
+      if (visited.has(cur)) continue;
+      visited.add(cur);
+      res.push(cur);
+      tasks.filter((t) => t.dependencies.includes(cur) && t.status === "backlog").forEach((t) => {
+        if (!visited.has(t.id)) queue.push(t.id);
+      });
+    }
+    return res;
+  })();
+  const chainIndex = new Map(chainIds.map((id, i) => [id, i]));
+  const isInChain = (id) => chainIndex.has(id);
   const visible = tasks
     .filter((t) => {
       if (filter === "active") return t.status === "backlog";
@@ -220,11 +242,18 @@ export default function TaskList() {
             const due = t.dueAt ? new Date(t.dueAt) : null;
             const dueLabel = due ? due.toLocaleDateString("en-US", { month: "short", day: "numeric" }) : null;
             const overdue = due ? due.getTime() < Date.now() && !isDone : false;
+            const inChain = !isDone && isInChain(t.id);
+            const step = inChain ? chainIndex.get(t.id) + 1 : null;
+            const depTitles = (t.dependencies || [])
+              .map((depId) => tasks.find((x) => x.id === depId)?.title || depId)
+              .filter(Boolean)
+              .slice(0, 2);
+            const blockedBy = depTitles.length ? depTitles.join(" · ") : null;
             return (
               <div
                 key={t.id}
                 role="listitem"
-                className={`task-row ${isDone ? "is-done" : ""} priority-${t.priority}`}
+                className={`task-row ${isDone ? "is-done" : ""} priority-${t.priority} ${inChain ? "is-chain" : ""}`}
                 tabIndex={0}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
@@ -253,6 +282,12 @@ export default function TaskList() {
                   </span>
                 </button>
 
+                {inChain && (
+                  <span className="task-chain-step" aria-hidden="true">
+                    {String(step).padStart(2, "0")}
+                  </span>
+                )}
+
                 <div className="task-row-main">
                   <span className="task-row-title" title={t.title}>
                     {t.title}
@@ -273,7 +308,25 @@ export default function TaskList() {
                         <span className={`task-row-due ${overdue ? "is-overdue" : ""}`}>Due {dueLabel}</span>
                       </>
                     )}
-                    {t.dependencies?.length > 0 && (
+                    {inChain && (
+                      <>
+                        <span className="meta-dot" aria-hidden="true">
+                          ·
+                        </span>
+                        <span className="task-row-chain">Chain → {step}/{chainIds.length}</span>
+                      </>
+                    )}
+                    {blockedBy && (
+                      <>
+                        <span className="meta-dot" aria-hidden="true">
+                          ·
+                        </span>
+                        <span className="task-row-deps" title={blockedBy}>
+                          ↳ {blockedBy}
+                        </span>
+                      </>
+                    )}
+                    {!blockedBy && t.dependencies?.length > 0 && (
                       <>
                         <span className="meta-dot" aria-hidden="true">
                           ·
