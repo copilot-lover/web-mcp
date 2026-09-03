@@ -13,11 +13,35 @@ export default function FocusMode() {
   const [elapsed, setElapsed] = useState(0);
   const [paused, setPaused] = useState(false);
   const intervalRef = useRef(null);
+  const totalPausedRef = useRef(0);
+  const pausedAtRef = useRef(null);
+
+  // Reset pause tracking when a new block starts
+  useEffect(() => {
+    if (!activeFocusBlock || activeFocusBlock.status !== 'active') {
+      setTimeRemaining(null);
+      setElapsed(0);
+      setPaused(false);
+      totalPausedRef.current = 0;
+      pausedAtRef.current = null;
+      return;
+    }
+    // new active block — reset pause accounting
+    totalPausedRef.current = 0;
+    pausedAtRef.current = null;
+    setPaused(false);
+  }, [activeFocusBlock?.id, activeFocusBlock?.status]);
 
   useEffect(() => {
     if (!activeFocusBlock || activeFocusBlock.status !== 'active') {
       setTimeRemaining(null);
       setElapsed(0);
+      return;
+    }
+    if (paused) {
+      // freeze — don't tick
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
       return;
     }
 
@@ -26,7 +50,7 @@ export default function FocusMode() {
 
     const tick = () => {
       const now = Date.now();
-      const elapsedMs = now - startedAt;
+      const elapsedMs = now - startedAt - totalPausedRef.current;
       const remaining = Math.max(0, durationMs - elapsedMs);
       setTimeRemaining(remaining);
       setElapsed(elapsedMs);
@@ -35,7 +59,7 @@ export default function FocusMode() {
     tick();
     intervalRef.current = setInterval(tick, 1000);
     return () => clearInterval(intervalRef.current);
-  }, [activeFocusBlock]);
+  }, [activeFocusBlock, paused]);
 
   if (!activeFocusBlock || activeFocusBlock.status !== 'active') return null;
 
@@ -46,7 +70,18 @@ export default function FocusMode() {
   const minutes = Math.floor((timeRemaining ?? 0) / 60000);
   const seconds = Math.floor(((timeRemaining ?? 0) % 60000) / 1000);
 
-  const handlePause = () => setPaused(!paused);
+  const handlePause = () => {
+    setPaused((prev) => {
+      const next = !prev;
+      if (next) {
+        pausedAtRef.current = Date.now();
+      } else if (pausedAtRef.current) {
+        totalPausedRef.current += Date.now() - pausedAtRef.current;
+        pausedAtRef.current = null;
+      }
+      return next;
+    });
+  };
 
   const handleComplete = (result) => {
     clearInterval(intervalRef.current);

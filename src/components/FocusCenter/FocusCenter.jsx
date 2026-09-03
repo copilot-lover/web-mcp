@@ -9,6 +9,7 @@ export default function FocusCenter({ task }) {
   const [showOverride, setShowOverride] = useState(false);
   const [overrideTaskId, setOverrideTaskId] = useState('');
   const [planUpdated, setPlanUpdated] = useState(false);
+  const [startError, setStartError] = useState('');
 
   const tasks = useFocusStore(s => s.tasks);
   const currentProposal = useFocusStore(s => s.currentProposal);
@@ -26,7 +27,19 @@ export default function FocusCenter({ task }) {
 
   const primary = currentProposal?.primaryTaskId || task.id;
   const handleStart = () => {
-    startFocusBlock(primary, tasks.find(t => t.id === primary)?.estimatedMinutes || 25);
+    setStartError('');
+    const proposedDuration = currentProposal?.durationMinutes;
+    const fallback = tasks.find((t) => t.id === primary)?.estimatedMinutes || 25;
+    const result = startFocusBlock(primary, proposedDuration ?? fallback);
+    if (result?.status === "error") {
+      const msg =
+        result.code === "TASK_BLOCKED"
+          ? `Can't start — still blocked by ${result.blocked?.join(", ")}`
+          : result.code === "TASK_NOT_ACTIVE"
+            ? "Can't start — task is no longer active"
+            : result.message || "Can't start focus block";
+      setStartError(msg);
+    }
   };
 
   const handleOverride = () => {
@@ -81,6 +94,12 @@ export default function FocusCenter({ task }) {
           </p>
         )}
       </div>
+
+      {startError && (
+        <p className="field-error" role="alert" style={{ marginTop: '12px' }}>
+          {startError}
+        </p>
+      )}
 
       <div className="focus-center-actions">
         <button className="btn btn-secondary" onClick={() => setShowOverride(!showOverride)}>

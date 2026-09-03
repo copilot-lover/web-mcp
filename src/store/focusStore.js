@@ -16,14 +16,18 @@ function computeCapacity(tasks, orderedTaskIds, availableMinutes) {
   const overflowTaskIds = [];
   let fitsMinutes = 0;
   let totalMinutes = 0;
+  let overflowed = false;
   for (const id of orderedTaskIds || []) {
     const t = byId.get(id);
     const mins = t ? (t.estimatedMinutes || 0) : 0;
     totalMinutes += mins;
-    if (fitsMinutes + mins <= availableMinutes) {
+    if (overflowed) {
+      overflowTaskIds.push(id);
+    } else if (fitsMinutes + mins <= availableMinutes) {
       fitsMinutes += mins;
       fitsTaskIds.push(id);
     } else {
+      overflowed = true;
       overflowTaskIds.push(id);
     }
   }
@@ -118,21 +122,45 @@ const useFocusStore = create((set, get) => ({
 
   proposePlan: (proposal) => {
     const capacity = computeCapacity(get().tasks, proposal.orderedTaskIds, get().availableMinutes);
-    set({ currentProposal: { ...proposal, capacity }, stateVersion: get().stateVersion + 1 });
+    // Preserve requested duration if provided (P1: don't silently fall back to estimatedMinutes)
+    const normalized = {
+      ...proposal,
+      durationMinutes: proposal.durationMinutes ?? proposal.requestedDurationMinutes ?? null,
+    };
+    set({ currentProposal: { ...normalized, capacity }, stateVersion: get().stateVersion + 1 });
   },
 
   clearProposal: () => set({ currentProposal: null, stateVersion: get().stateVersion + 1 }),
 
-  startFocusBlock: (taskId, durationMinutes) => set({
-    activeFocusBlock: {
-      id: genId(),
-      taskId,
-      durationMinutes,
-      status: "active",
-      startedAt: new Date().toISOString(),
-    },
-    stateVersion: get().stateVersion + 1,
-  }),
+  startFocusBlock: (taskId, durationMinutes) => {
+    const s = get();
+    const task = s.tasks.find((t) => t.id === taskId);
+    if (!task) {
+      return { status: "error", code: "TASK_NOT_FOUND", message: `Task ${taskId} not found`, stateVersion: s.stateVersion };
+    }
+    if (task.status !== "backlog") {
+      return { status: "error", code: "TASK_NOT_ACTIVE", message: `Task ${taskId} is ${task.status}, not backlog`, stateVersion: s.stateVersion };
+    }
+    const blocked = (task.dependencies || []).filter((depId) => {
+      const dep = s.tasks.find((t) => t.id === depId);
+      return dep && dep.status !== "completed";
+    });
+    if (blocked.length > 0) {
+      return { status: "error", code: "TASK_BLOCKED", message: `Task ${taskId} is blocked by unfinished dependencies`, blocked, stateVersion: s.stateVersion };
+    }
+    const safeDuration = Math.max(5, Math.min(480, Math.round(Number(durationMinutes) || task.estimatedMinutes || 25)));
+    set({
+      activeFocusBlock: {
+        id: genId(),
+        taskId,
+        durationMinutes: safeDuration,
+        status: "active",
+        startedAt: new Date().toISOString(),
+      },
+      stateVersion: get().stateVersion + 1,
+    });
+    return { status: "active", taskId, durationMinutes: safeDuration, stateVersion: get().stateVersion };
+  },
 
   // Complete the block, mark the task done (when completed), and advance the
   // plan to the next task — the repeated loop. Returns structured next-task
@@ -169,6 +197,7 @@ const useFocusStore = create((set, get) => ({
       if (nextTaskId) {
         const chain = getDownstreamChain(tasks, nextTaskId);
         const capacity = computeCapacity(tasks, chain, s.availableMinutes);
+        const nextEst = tasks.find((t) => t.id === nextTaskId)?.estimatedMinutes || 25;
         currentProposal = {
           id: "proposal-1",
           primaryTaskId: nextTaskId,
@@ -176,6 +205,7 @@ const useFocusStore = create((set, get) => ({
           rationale: ["next in sequence"],
           confidence: 0.85,
           requiresApproval: true,
+          durationMinutes: nextEst,
           capacity,
         };
       } else {
@@ -255,10 +285,16 @@ const useFocusStore = create((set, get) => ({
     stateVersion: s.stateVersion + 1,
   })),
 
-  deferTask: (taskId) => set((s) => ({
-    tasks: s.tasks.map((t) => (t.id === taskId ? { ...t, status: "deferred" } : t)),
-    stateVersion: s.stateVersion + 1,
-  })),
+  deferTask: (taskId) => {
+    const wasBottleneck = get().bottleneckTaskId === taskId;
+    set((s) => ({
+      tasks: s.tasks.map((t) => (t.id === taskId ? { ...t, status: "deferred" } : t)),
+      stateVersion: s.stateVersion + 1,
+    }));
+    get().assessOverload();
+    if (wasBottleneck) get().identifyBottleneck();
+    return { status: "deferred", taskId, stateVersion: get().stateVersion };
+  },
 
   // --- Task CRUD for the clean list (add/toggle/update/remove) ---
   addTask: ({ title, estimatedMinutes = 25, priority = "medium", dueAt = null, dependencies = [], tags = [] }) => {
@@ -293,6 +329,7 @@ const useFocusStore = create((set, get) => ({
     const t = s.tasks.find((x) => x.id === taskId);
     if (!t) return { status: "error", code: "TASK_NOT_FOUND" };
     const nextStatus = t.status === "completed" ? "backlog" : "completed";
+    const wasBottleneck = s.bottleneckTaskId === taskId && nextStatus !== "backlog";
     const tasks = s.tasks.map((x) => (x.id === taskId ? { ...x, status: nextStatus } : x));
     set({ tasks, stateVersion: s.stateVersion + 1 });
     get().assessOverload();
@@ -301,20 +338,27 @@ const useFocusStore = create((set, get) => ({
       const capacity = computeCapacity(tasks, prop.orderedTaskIds, get().availableMinutes);
       set({ currentProposal: { ...prop, capacity }, stateVersion: get().stateVersion + 1 });
     }
+    if (wasBottleneck) get().identifyBottleneck();
     return { status: "toggled", taskId, nextStatus, stateVersion: get().stateVersion };
   },
 
   updateTask: (taskId, patch) => {
     const s = get();
     if (!s.tasks.some((t) => t.id === taskId)) return { status: "error", code: "TASK_NOT_FOUND" };
+    const wasBottleneck = s.bottleneckTaskId === taskId;
     const tasks = s.tasks.map((t) => (t.id === taskId ? { ...t, ...patch } : t));
     set({ tasks, stateVersion: s.stateVersion + 1 });
     get().assessOverload();
+    if (wasBottleneck) {
+      const updated = tasks.find((t) => t.id === taskId);
+      if (!updated || updated.status !== "backlog") get().identifyBottleneck();
+    }
     return { status: "updated", taskId, stateVersion: get().stateVersion };
   },
 
   removeTask: (taskId) => {
     const s = get();
+    const wasBottleneck = s.bottleneckTaskId === taskId;
     const tasks = s.tasks.filter((t) => t.id !== taskId);
     // also strip it from any dependencies
     const cleaned = tasks.map((t) => ({ ...t, dependencies: (t.dependencies || []).filter((d) => d !== taskId) }));
@@ -329,6 +373,7 @@ const useFocusStore = create((set, get) => ({
     }
     set({ tasks: cleaned, currentProposal, stateVersion: s.stateVersion + 1 });
     get().assessOverload();
+    if (wasBottleneck) get().identifyBottleneck();
     return { status: "removed", taskId, stateVersion: get().stateVersion };
   },
 
@@ -357,12 +402,21 @@ const useFocusStore = create((set, get) => ({
   },
 
   // Identify bottleneck — finds task with most downstream dependents + closest deadline
+  // Prefers unblocked tasks (dependencies completed) to avoid recommending blocked work.
   identifyBottleneck: () => {
     const s = get();
+    const activeTasks = s.tasks.filter((t) => t.status !== "completed" && t.status !== "deferred");
+    const activeIds = new Set(activeTasks.map((t) => t.id));
+    const isBlocked = (t) => (t.dependencies || []).some((depId) => {
+      const dep = s.tasks.find((x) => x.id === depId);
+      return dep && dep.status !== "completed";
+    });
+
     // Build dependency tree (which tasks depend on which)
     const downstreamMap = {};
-    s.tasks.filter((t) => t.status !== "completed" && t.status !== "deferred").forEach((t) => {
+    activeTasks.forEach((t) => {
       t.dependencies.forEach((depId) => {
+        if (!activeIds.has(depId) && !s.tasks.some((x) => x.id === depId)) return;
         if (!downstreamMap[depId]) downstreamMap[depId] = [];
         downstreamMap[depId].push(t.id);
       });
@@ -370,22 +424,34 @@ const useFocusStore = create((set, get) => ({
 
     let bottleneck = null;
     let bestScore = -1;
+    let fallback = null;
+    let fallbackScore = -1;
     const now = new Date();
 
-    s.tasks.filter((t) => t.status !== "completed" && t.status !== "deferred").forEach((t) => {
+    activeTasks.forEach((t) => {
       const downstream = downstreamMap[t.id]?.length || 0;
       const urgency = t.dueAt ? (new Date(t.dueAt) - now) / 3600000 : 168;
       const priorityScore = t.priority === "critical" ? 5 : t.priority === "high" ? 3 : t.priority === "medium" ? 1 : 0;
       const score = downstream * 3 + (100 / Math.max(urgency, 0.1)) + priorityScore * 2;
+      const blocked = isBlocked(t);
 
-      if (score > bestScore) {
-        bestScore = score;
-        bottleneck = t.id;
+      if (blocked) {
+        if (score > fallbackScore) {
+          fallbackScore = score;
+          fallback = t.id;
+        }
+      } else {
+        if (score > bestScore) {
+          bestScore = score;
+          bottleneck = t.id;
+        }
       }
     });
 
-    set({ bottleneckTaskId: bottleneck, stateVersion: s.stateVersion + 1 });
-    return bottleneck;
+    // Prefer unblocked; fall back to blocked only if every active task is blocked
+    const chosen = bottleneck ?? fallback;
+    set({ bottleneckTaskId: chosen, stateVersion: s.stateVersion + 1 });
+    return chosen;
   },
 }));
 

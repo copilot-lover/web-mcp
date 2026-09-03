@@ -59,9 +59,18 @@ function App() {
 
   const isCustomActive = !TIME_PRESETS.some((p) => p.minutes === availableMinutes);
 
-  // Auto-identify the bottleneck on first load so the Focus Center has a next action even before the agent runs.
+  // Auto-identify the bottleneck on first load and re-identify when the current
+  // bottleneck leaves the backlog (completed/deferred/removed). Without this,
+  // completing the bottleneck would leave a stale ID and the guard
+  // `!bottleneckTaskId` would never re-run, so the Focus Center could keep
+  // recommending a completed task or show "No next task" while backlog remains.
   useEffect(() => {
-    if (!currentProposal && !bottleneckTaskId && tasks.some((t) => t.status === "backlog")) {
+    if (currentProposal) return;
+    const hasBacklog = tasks.some((t) => t.status === "backlog");
+    if (!hasBacklog) return;
+    const bottleneckTask = bottleneckTaskId ? tasks.find((t) => t.id === bottleneckTaskId) : null;
+    const isStale = bottleneckTaskId && (!bottleneckTask || bottleneckTask.status !== "backlog");
+    if (!bottleneckTaskId || isStale) {
       useFocusStore.getState().identifyBottleneck();
     }
   }, [currentProposal, bottleneckTaskId, tasks]);

@@ -243,6 +243,7 @@ if (!ctx) {
         rationale: [args.reason || "highest priority"],
         confidence: 0.85,
         requiresApproval: true,
+        durationMinutes: args.durationMinutes,
       };
 
       s.proposePlan(proposal);
