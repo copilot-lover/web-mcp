@@ -1,78 +1,123 @@
-import { useState } from 'react';
-import CognitiveMap from './components/CognitiveMap/CognitiveMap.jsx';
-import FocusCenter from './components/FocusCenter/FocusCenter.jsx';
-import PlanTimeline from './components/PlanTimeline/PlanTimeline.jsx';
-import FocusMode from './components/FocusMode/FocusMode.jsx';
-import ActivityRail from './components/ActivityRail/ActivityRail.jsx';
-import useFocusStore from './store/focusStore.js';
+import { useState, useEffect } from "react";
+import TaskList from "./components/TaskList/TaskList.jsx";
+import FocusCenter from "./components/FocusCenter/FocusCenter.jsx";
+import PlanTimeline from "./components/PlanTimeline/PlanTimeline.jsx";
+import FocusMode from "./components/FocusMode/FocusMode.jsx";
+import ActivityRail from "./components/ActivityRail/ActivityRail.jsx";
+import useFocusStore from "./store/focusStore.js";
 
-// Lightweight time presets — the single lever that re-plans scope.
 const TIME_PRESETS = [
-  { label: '30m', minutes: 30 },
-  { label: '60m', minutes: 60 },
-  { label: '90m', minutes: 90 },
-  { label: '2h', minutes: 120 },
+  { label: "30m", minutes: 30 },
+  { label: "60m", minutes: 60 },
+  { label: "90m", minutes: 90 },
+  { label: "2h", minutes: 120 },
 ];
 
 function App() {
-  const overloadLevel = useFocusStore(s => s.overloadLevel);
-  const availableMinutes = useFocusStore(s => s.availableMinutes);
-  const bottleneckTaskId = useFocusStore(s => s.bottleneckTaskId);
-  const currentProposal = useFocusStore(s => s.currentProposal);
-  const activeFocusBlock = useFocusStore(s => s.activeFocusBlock);
-  const tasks = useFocusStore(s => s.tasks);
-  const setAvailableMinutes = useFocusStore(s => s.setAvailableMinutes);
+  const overloadLevel = useFocusStore((s) => s.overloadLevel);
+  const availableMinutes = useFocusStore((s) => s.availableMinutes);
+  const defaultAvailableMinutes = useFocusStore((s) => s.defaultAvailableMinutes);
+  const bottleneckTaskId = useFocusStore((s) => s.bottleneckTaskId);
+  const currentProposal = useFocusStore((s) => s.currentProposal);
+  const activeFocusBlock = useFocusStore((s) => s.activeFocusBlock);
+  const tasks = useFocusStore((s) => s.tasks);
+  const setAvailableMinutes = useFocusStore((s) => s.setAvailableMinutes);
+  const setDefaultMinutes = useFocusStore((s) => s.setDefaultMinutes);
 
-  // The one task the UI steers toward: the proposal's primary if a plan exists,
-  // otherwise the agent-identified bottleneck.
   const displayTaskId = currentProposal ? currentProposal.primaryTaskId : bottleneckTaskId;
-  const displayTask = displayTaskId ? tasks.find(t => t.id === displayTaskId) : null;
+  const displayTask = displayTaskId ? tasks.find((t) => t.id === displayTaskId) : null;
 
-  const activeCount = tasks.filter(t => t.status === 'backlog').length;
-  const isFocusing = activeFocusBlock?.status === 'active';
+  const activeCount = tasks.filter((t) => t.status === "backlog").length;
+  const isFocusing = activeFocusBlock?.status === "active";
   const allDone = activeCount === 0 && !isFocusing;
 
   const [customOpen, setCustomOpen] = useState(false);
-  const [customMinutes, setCustomMinutes] = useState('');
+  const [customMinutes, setCustomMinutes] = useState("");
+  const [timeFeedback, setTimeFeedback] = useState("");
 
-  const handlePreset = (minutes) => { setCustomOpen(false); setCustomMinutes(''); setAvailableMinutes(minutes); };
+  const handlePreset = (minutes) => {
+    setCustomOpen(false);
+    setCustomMinutes("");
+    setAvailableMinutes(minutes);
+    setTimeFeedback(`Time set to ${minutes}m`);
+    setTimeout(() => setTimeFeedback(""), 2000);
+  };
   const handleCustom = () => {
     const m = parseInt(customMinutes, 10);
-    if (m > 0) setAvailableMinutes(m);
+    if (m > 0) {
+      setAvailableMinutes(m);
+      setTimeFeedback(`Time set to ${m}m`);
+      setTimeout(() => setTimeFeedback(""), 2000);
+    }
     setCustomOpen(false);
   };
+  const handleSetDefault = () => {
+    setDefaultMinutes(availableMinutes);
+    setTimeFeedback(`Default saved: ${availableMinutes}m`);
+    setTimeout(() => setTimeFeedback(""), 2200);
+  };
+
+  const isCustomActive = !TIME_PRESETS.some((p) => p.minutes === availableMinutes);
+
+  // Auto-identify the bottleneck on first load so the Focus Center has a next action even before the agent runs.
+  useEffect(() => {
+    if (!currentProposal && !bottleneckTaskId && tasks.some((t) => t.status === "backlog")) {
+      useFocusStore.getState().identifyBottleneck();
+    }
+  }, [currentProposal, bottleneckTaskId, tasks]);
 
   return (
     <div className="app">
+      <a className="skip-link" href="#main">
+        Skip to main content
+      </a>
+
       <header className="top-bar">
         <div className="top-bar-left">
           <h1 className="logo">FOCUS</h1>
           <span className="reticle-dot" aria-hidden="true"></span>
-          <span className="top-bar-separator"></span>
+          <span className="top-bar-separator" aria-hidden="true"></span>
           <span className="today-label">TODAY</span>
-          <span className="avail-sep" aria-hidden="true">·</span>
-          <span className="available-time">
-            <span className="avail-num"><span className="avail-value">{availableMinutes}</span>m</span> available
+          <span className="avail-sep" aria-hidden="true">
+            ·
           </span>
-          <div className="time-select">
-            {TIME_PRESETS.map(p => (
+          <span className="available-time" aria-live="polite" aria-atomic="true">
+            <span className="avail-num">
+              <span className="avail-value">{availableMinutes}</span>m
+            </span>{" "}
+            available
+            {defaultAvailableMinutes !== availableMinutes && (
+              <span className="avail-default-hint"> · default {defaultAvailableMinutes}m</span>
+            )}
+          </span>
+
+          <div className="time-select" role="group" aria-label="Available time">
+            {TIME_PRESETS.map((p) => (
               <button
                 key={p.minutes}
-                className={`time-preset ${!customOpen && availableMinutes === p.minutes ? 'is-active' : ''}`}
+                className={`time-preset ${!customOpen && availableMinutes === p.minutes ? "is-active" : ""}`}
                 onClick={() => handlePreset(p.minutes)}
+                aria-pressed={availableMinutes === p.minutes}
+                aria-label={`Set available time to ${p.label}`}
               >
                 {p.label}
               </button>
             ))}
             <button
-              className={`time-preset ${customOpen ? 'is-active' : ''}`}
+              className={`time-preset ${customOpen || isCustomActive ? "is-active" : ""}`}
               onClick={() => setCustomOpen(!customOpen)}
+              aria-expanded={customOpen}
+              aria-pressed={isCustomActive}
             >
               custom
             </button>
             {customOpen && (
               <span className="time-select-custom">
+                <label className="sr-only" htmlFor="custom-mins">
+                  Custom minutes
+                </label>
                 <input
+                  id="custom-mins"
                   type="number"
                   min="15"
                   step="15"
@@ -80,35 +125,51 @@ function App() {
                   autoFocus
                   value={customMinutes}
                   onChange={(e) => setCustomMinutes(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleCustom()}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleCustom();
+                    if (e.key === "Escape") setCustomOpen(false);
+                  }}
                 />
-                <button className="btn btn-text time-select-set" onClick={handleCustom}>Set</button>
+                <button className="btn btn-text time-select-set" onClick={handleCustom}>
+                  Set
+                </button>
               </span>
             )}
+            <button className="btn btn-text time-default-btn" onClick={handleSetDefault} title="Save current time as default">
+              Set default
+            </button>
+            {isCustomActive && <span className="time-custom-badge">{availableMinutes}m</span>}
           </div>
+
+          <span className="time-feedback" role="status" aria-live="polite">
+            {timeFeedback}
+          </span>
         </div>
+
         <div className="top-bar-right">
-          <span className={`overload-signal ${overloadLevel === 'high' ? 'is-high' : ''}`}>
+          <span className={`overload-signal ${overloadLevel === "high" ? "is-high" : ""}`} aria-live="polite">
             <span className="overload-lamp" aria-hidden="true"></span>
             OVERLOAD {overloadLevel.toUpperCase()}
           </span>
           <button
             className="btn btn-text top-bar-companion"
-            onClick={() => window.open('/companion.html', 'webmcp-companion', 'width=980,height=760')}
+            onClick={() => window.open("/companion.html", "webmcp-companion", "width=980,height=760")}
           >
             Companion
           </button>
         </div>
       </header>
 
-      <main className="main-content">
-        <div className="map-canvas">
-          <CognitiveMap />
+      <main id="main" className="main-content">
+        <div className="task-pane">
+          <TaskList />
+          {/* Quiet execution sequence lives under the list on mobile, beside it on desktop via the right rail */}
+          <div className="mobile-timeline">
+            <PlanTimeline />
+          </div>
         </div>
 
-        {/* Focus Center — the dominant centred card carrying the next action.
-            It overlays the (receded) graph, which stays full-bleed behind it. */}
-        <div className="focus-center-layer">
+        <aside className="focus-pane" aria-label="Focus and plan">
           {allDone ? (
             <div className="all-clear">
               <span className="reticle-dot" aria-hidden="true"></span>
@@ -117,11 +178,23 @@ function App() {
             </div>
           ) : displayTask && !isFocusing ? (
             <FocusCenter task={displayTask} />
-          ) : null}
-        </div>
+          ) : isFocusing ? (
+            <div className="focus-pane-placeholder">
+              <p className="focus-pane-placeholder-title">Focusing</p>
+              <p className="focus-pane-placeholder-sub">Complete the block to return to the list.</p>
+            </div>
+          ) : (
+            <div className="focus-pane-placeholder">
+              <p className="focus-pane-placeholder-title">No next task</p>
+              <p className="focus-pane-placeholder-sub">Add a task to get a recommendation.</p>
+            </div>
+          )}
 
-        <PlanTimeline />
-        <ActivityRail />
+          <div className="desktop-timeline">
+            <PlanTimeline />
+          </div>
+          <ActivityRail />
+        </aside>
       </main>
 
       <FocusMode />

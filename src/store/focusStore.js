@@ -56,10 +56,16 @@ function getDownstreamChain(tasks, startTaskId) {
   return result;
 }
 
+const STORAGE_KEY_MINUTES = "focus:defaultMinutes";
+const storedDefault = (() => {
+  try { const v = Number(localStorage.getItem(STORAGE_KEY_MINUTES)); return Number.isFinite(v) && v >= 15 ? v : null; } catch { return null; }
+})();
+
 const useFocusStore = create((set, get) => ({
   // State
   tasks: JSON.parse(JSON.stringify(TASKS)),
-  availableMinutes: DEMO_CONTEXT.availableMinutes,
+  availableMinutes: storedDefault ?? DEMO_CONTEXT.availableMinutes,
+  defaultAvailableMinutes: storedDefault ?? DEMO_CONTEXT.availableMinutes,
   overloadLevel: DEMO_CONTEXT.overloadLevel,
   currentProposal: null,
   activeFocusBlock: null,
@@ -87,6 +93,25 @@ const useFocusStore = create((set, get) => ({
       set({ currentProposal: { ...prop, capacity }, stateVersion: get().stateVersion + 1 });
     }
     return get().stateVersion;
+  },
+
+  // Persist the current availableMinutes as the default for next load.
+  setDefaultMinutes: (minutes) => {
+    const safe = Math.max(15, Math.round(Number(minutes) || 0));
+    try { localStorage.setItem(STORAGE_KEY_MINUTES, String(safe)); } catch {}
+    set({ defaultAvailableMinutes: safe, availableMinutes: safe, stateVersion: get().stateVersion + 1 });
+    get().assessOverload();
+    const prop = get().currentProposal;
+    if (prop && Array.isArray(prop.orderedTaskIds)) {
+      const capacity = computeCapacity(get().tasks, prop.orderedTaskIds, safe);
+      set({ currentProposal: { ...prop, capacity }, stateVersion: get().stateVersion + 1 });
+    }
+    return get().stateVersion;
+  },
+
+  resetToDefaultMinutes: () => {
+    const safe = get().defaultAvailableMinutes ?? DEMO_CONTEXT.availableMinutes;
+    return get().setAvailableMinutes(safe);
   },
 
   setBottleneckTaskId: (id) => set({ bottleneckTaskId: id, stateVersion: get().stateVersion + 1 }),
@@ -234,6 +259,78 @@ const useFocusStore = create((set, get) => ({
     tasks: s.tasks.map((t) => (t.id === taskId ? { ...t, status: "deferred" } : t)),
     stateVersion: s.stateVersion + 1,
   })),
+
+  // --- Task CRUD for the clean list (add/toggle/update/remove) ---
+  addTask: ({ title, estimatedMinutes = 25, priority = "medium", dueAt = null, dependencies = [], tags = [] }) => {
+    const clean = String(title || "").trim();
+    if (!clean) return { status: "error", code: "EMPTY_TITLE" };
+    const mins = Math.max(5, Math.min(480, Math.round(Number(estimatedMinutes) || 25)));
+    const id = `task-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const newTask = {
+      id,
+      title: clean,
+      priority: ["critical", "high", "medium", "low"].includes(priority) ? priority : "medium",
+      status: "backlog",
+      estimatedMinutes: mins,
+      dueAt: dueAt || null,
+      dependencies: Array.isArray(dependencies) ? dependencies.filter(Boolean) : [],
+      tags: Array.isArray(tags) ? tags : [],
+    };
+    const tasks = [...get().tasks, newTask];
+    set({ tasks, stateVersion: get().stateVersion + 1 });
+    get().assessOverload();
+    // keep capacity in sync if a proposal exists
+    const prop = get().currentProposal;
+    if (prop && Array.isArray(prop.orderedTaskIds)) {
+      const capacity = computeCapacity(tasks, prop.orderedTaskIds, get().availableMinutes);
+      set({ currentProposal: { ...prop, capacity }, stateVersion: get().stateVersion + 1 });
+    }
+    return { status: "created", task: newTask, stateVersion: get().stateVersion };
+  },
+
+  toggleTask: (taskId) => {
+    const s = get();
+    const t = s.tasks.find((x) => x.id === taskId);
+    if (!t) return { status: "error", code: "TASK_NOT_FOUND" };
+    const nextStatus = t.status === "completed" ? "backlog" : "completed";
+    const tasks = s.tasks.map((x) => (x.id === taskId ? { ...x, status: nextStatus } : x));
+    set({ tasks, stateVersion: s.stateVersion + 1 });
+    get().assessOverload();
+    const prop = get().currentProposal;
+    if (prop && Array.isArray(prop.orderedTaskIds)) {
+      const capacity = computeCapacity(tasks, prop.orderedTaskIds, get().availableMinutes);
+      set({ currentProposal: { ...prop, capacity }, stateVersion: get().stateVersion + 1 });
+    }
+    return { status: "toggled", taskId, nextStatus, stateVersion: get().stateVersion };
+  },
+
+  updateTask: (taskId, patch) => {
+    const s = get();
+    if (!s.tasks.some((t) => t.id === taskId)) return { status: "error", code: "TASK_NOT_FOUND" };
+    const tasks = s.tasks.map((t) => (t.id === taskId ? { ...t, ...patch } : t));
+    set({ tasks, stateVersion: s.stateVersion + 1 });
+    get().assessOverload();
+    return { status: "updated", taskId, stateVersion: get().stateVersion };
+  },
+
+  removeTask: (taskId) => {
+    const s = get();
+    const tasks = s.tasks.filter((t) => t.id !== taskId);
+    // also strip it from any dependencies
+    const cleaned = tasks.map((t) => ({ ...t, dependencies: (t.dependencies || []).filter((d) => d !== taskId) }));
+    let currentProposal = s.currentProposal;
+    if (currentProposal && Array.isArray(currentProposal.orderedTaskIds) && currentProposal.orderedTaskIds.includes(taskId)) {
+      const nextIds = currentProposal.orderedTaskIds.filter((id) => id !== taskId);
+      if (nextIds.length === 0) currentProposal = null;
+      else {
+        const capacity = computeCapacity(cleaned, nextIds, s.availableMinutes);
+        currentProposal = { ...currentProposal, orderedTaskIds: nextIds, primaryTaskId: nextIds[0] || null, capacity };
+      }
+    }
+    set({ tasks: cleaned, currentProposal, stateVersion: s.stateVersion + 1 });
+    get().assessOverload();
+    return { status: "removed", taskId, stateVersion: get().stateVersion };
+  },
 
   // Assessment helper — overload now reflects capacity: total active minutes vs
   // available time, so a smaller window genuinely reads as more overloaded.
